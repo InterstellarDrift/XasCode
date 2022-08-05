@@ -15,6 +15,10 @@
 
 #include <array>
 
+
+#define CONFIG_XASAUDIO_RX_SAMPLERATE 16000
+#define CONFIG_XASAUDIO_RX_FRAMELENGTH 20
+
 #define XASAUDIO_RX_FRAME_SAMPLE_NO ((CONFIG_XASAUDIO_RX_SAMPLERATE * CONFIG_XASAUDIO_RX_FRAMELENGTH)/1000)
 
 namespace Xasin {
@@ -48,7 +52,7 @@ public:
 
 	void audio_dma_read_task();
 
-	RX(i2s_port_t rx_port = I2S_NUM_1);
+	RX(i2s_port_t rx_port = I2S_NUM_0);
 	RX(const RX&) = delete;
 
 	// virtual ~RX();
