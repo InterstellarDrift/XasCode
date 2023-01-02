@@ -5,7 +5,7 @@
  *      Author: xasin
  */
 
-#include "xasin/neocontroller/Color.h"
+#include "xnm/neocontroller.h"
 
 #include <algorithm>
 #include <math.h>
@@ -18,8 +18,8 @@
 #define RAW_TO_U8(v)   uint8_t(v/257)
 
 
-namespace Xasin {
-namespace NeoController {
+namespace XNM {
+namespace Neo {
 
 Color Color::HSV(int16_t H, uint8_t S, uint8_t V) {
 	H %= 360;
@@ -36,7 +36,7 @@ Color Color::HSV(int16_t H, uint8_t S, uint8_t V) {
 	Color oC = Color();
 
 	switch(h) {
-	default:oC.r = V; oC.g = t; oC.b = p; break;
+	default:oC.r = V*255; oC.g = t; oC.b = p; break;
 	case 1: oC.r = q; oC.g = V*255; oC.b = p; break;
 	case 2: oC.r = p; oC.g = V*255; oC.b = t; break;
 	case 3: oC.r = p; oC.g = q; oC.b = V*255; break;
@@ -51,7 +51,7 @@ Color Color::HSV(int16_t H, uint8_t S, uint8_t V) {
 #define MIN_B_TEMP (9)
 #define MAX_B_TEMP (20)
 Color Color::Temperature(float temperature, float brightness) {
-	Xasin::NeoController::Color out = 0;
+	Color out = 0;
 
     float r_temp = 0;
     float g_temp = 0;
@@ -114,15 +114,37 @@ Color Color::Temperature(float temperature, float brightness) {
 	return out;
 }
 
-Color Color::strtoc(const char *str) {
+Color Color::strtoc(const char *str, bool *ok) {
+	if(ok) *ok = false;
+
 	if(str == nullptr)
 		return 0;
-	if(*str == '#') str++;
 
-	if(*str == 0)
-		return 0;
+	if(*str == '#') {
+			str++;
 
-	return Color(strtol(str, nullptr, 16));
+		if(*str == 0)
+			return 0;
+
+		if(ok) *ok = true;
+
+		return Color(strtol(str, nullptr, 16));
+	}
+	else if(*str == 'K') {
+		str++;
+		if(*str == 0)
+			return 0;
+
+		auto temperature = strtol(str, nullptr, 10);
+
+		if(temperature < 0 || temperature > 20000)
+			return 0;
+		
+		if(ok) *ok = true;
+		return Temperature(temperature);
+	}
+
+	return 0;
 }
 
 Color::Color() {
@@ -154,6 +176,14 @@ uint32_t Color::getPrintable() const {
 	return (uint32_t(RAW_TO_U8(r)) << 16) | (uint32_t(RAW_TO_U8(g)) << 8) | (RAW_TO_U8(b));
 }
 
+std::string Color::to_s() const {
+	char buffer[8] = {};
+
+	sprintf(buffer, "#%06X", getPrintable());
+
+	return std::string(buffer);
+}
+
 void Color::set(Color color) {
 	for(uint8_t i=0; i<4; i++) {
 		*(&this->r + i) = *(&color.r + i);
@@ -173,6 +203,15 @@ Color& Color::operator=(const Color& nColor) {
 	this->set(nColor);
 
 	return *this;
+}
+
+#define COMPARE_PART(part) if(RAW_TO_U8(this->part) != RAW_TO_U8(compare.part)) return false;
+bool Color::operator==(const Color& compare) const {
+	COMPARE_PART(r);
+	COMPARE_PART(g);
+	COMPARE_PART(b);
+
+	return true;
 }
 
 Color &Color::bMod(uint8_t factor) {

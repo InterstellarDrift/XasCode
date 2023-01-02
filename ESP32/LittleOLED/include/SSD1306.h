@@ -14,7 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "MasterAction.h"
+#include "xnm/i2c/MasterAction.h"
 
 #include "DrawBox.h"
 
@@ -47,6 +47,7 @@ public:
 		SET_COLUMN_RANGE	= 0x21,
 		SET_PAGE_RANGE		= 0x22,
 
+		SET_SEG_REMAP = 0xA0,
 		SET_MUX_RATIO	= 0xA8,
 		SET_DISPLAY_OFFSET = 0xD3,
 		SET_COM_PIN_MAP = 0xDA,
@@ -60,15 +61,15 @@ public:
 private:
 	static void call_raw_update(void *args);
 
-	XaI2C::MasterAction *currentAction;
+	XNM::I2C::MasterAction *currentAction;
 
 	std::vector<char> cmdBuffer;
 
-	std::array<std::array<uint8_t, 128>, 4> screenBuffer;
+	std::array<std::array<uint8_t, 64>, 4> screenBuffer;
 
 	TaskHandle_t updateTask;
 
-	XaI2C::MasterAction* start_cmd_set();
+	XNM::I2C::MasterAction* start_cmd_set();
 
 	void send_cmd(uint8_t cmdVal);
 	void send_cmd(uint8_t cmdVal, uint8_t extraByte);
@@ -82,7 +83,7 @@ public:
 
 	void initialize();
 
-	void set_coordinates(uint8_t column = 0, uint8_t page = 0, uint8_t maxColumn = 127, uint8_t maxPage = 3);
+	void set_page(uint8_t page);
 
 	void clear();
 	void push_entire_screen();

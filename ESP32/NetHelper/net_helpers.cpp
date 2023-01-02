@@ -2,130 +2,64 @@
 #include <xnm/net_helpers.h>
 #include <xnm/net_helpers/r3_certificate.h>
 
+#include <xnm/net_helpers/wifi.h>
+
 #include <nvs.h>
 #include <esp_tls.h>
 
 #include <esp_https_ota.h>
 #include <esp_ota_ops.h>
 
+#include <lwip/apps/sntp.h>
+#include <esp_sntp.h>
+
 #include <cstring>
 
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include <esp_log.h>
+
 
 namespace XNM {
 namespace NetHelpers {
 
-Xasin::MQTT::Handler *mqtt_ptr;
+net_state_t net_state = UNINITIALIZED;
 std::string device_id = "";
 
-namespace OTA {
-    ota_state_t ota_state = UNKNOWN;
-
-    TaskHandle_t current_update_thread = nullptr;
-
-    uint32_t current_version = 0;
-    uint32_t upstream_version = 0;
-
-    uint32_t get_version() {
-        if(current_version != 0)
-            return current_version;
-
-        nvs_handle_t nvs;
-        nvs_open("xasin", NVS_READONLY, &nvs);
-
-        uint32_t out = 0;
-        auto ret = nvs_get_u32(nvs, "ota_vers", &out);
-
-        nvs_close(nvs);
-
-        if(ret != ESP_OK)
-            return 0;
-
-        current_version = out;
-        return out;
-    }
-
-    void set_version(uint32_t vers) {
-        current_version = vers;
-
-        nvs_handle_t nvs;
-        nvs_open("xasin", NVS_READWRITE, &nvs);
-
-        nvs_set_u32(nvs, "ota_vers", vers);
-        nvs_close(nvs);
-    }
-
-    void esp_ota_thread(void *args) {
-        char bfr[128] = {};
-        snprintf(bfr, 128, "https://xaseiresh.hopto.org/api/esp_ota/%s.bin", CONFIG_PROJECT_NAME);
-
-        esp_http_client_config_t ota_cfg = {};
-        ota_cfg.url = bfr;
-        ota_cfg.use_global_ca_store = true;
-        ota_cfg.cert_pem = lets_encrypt_rX_pem_start;
-
-        esp_https_ota(&ota_cfg);
-
-        set_version(upstream_version);
-
-        ota_state = REBOOT_NEEDED;
-
-        esp_restart();
-
-        vTaskDelete(0);
-    }
-
-    void set_upstream_version(uint32_t up_version) {
-        if(up_version == 0)
-            return;
-        if(up_version <= upstream_version)
-            return;
-        
-        esp_ota_mark_app_valid_cancel_rollback();
-
-        upstream_version = up_version;
-
-        if(upstream_version > current_version) {
-            ota_state = DOWNLOADING;
-            xTaskCreatePinnedToCore(esp_ota_thread, "OTA Thread", 6144, nullptr, 1, nullptr, 0);
-        }
-        else
-            ota_state = UP_TO_DATE;
-    }
-
-    void init() {
-        static bool ota_initialized = false;
-
-        if(ota_initialized) {
-            ESP_LOGE("OTA", "OTA Set up twice, ignoring second one!");
-            return;
-        }
-        ota_initialized = true;
-        
-        get_version();
-
-        char buf[128] = {};
-        snprintf(buf, 128, "/esp32/%s/ota", CONFIG_PROJECT_NAME);
-
-        if(mqtt_ptr == nullptr) {
-            ESP_LOGE("XNM OTA", "No MQTT was provided, no OTA fetch possible!");
-            return;
-        }
-
-        mqtt_ptr->subscribe_to(buf, [](const Xasin::MQTT::MQTT_Packet data) {
-            set_upstream_version(std::stoul(data.data));
-        });
-
-        ota_initialized = true;
-    }
-
-    ota_state_t get_state() {
-        return ota_state;
-    }
+net_state_t get_state() {
+    return net_state;
 }
 
-void set_mqtt(Xasin::MQTT::Handler &mqtt) {
-    mqtt_ptr = &mqtt;
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
+Xasin::MQTT::Handler mqtt = Xasin::MQTT::Handler();
+#endif
+
+#ifdef CONFIG_XNM_NETHELP_BLE_ENABLE
+XNM::BLE::Server ble = XNM::BLE::Server();
+#endif
+
+
+#ifdef CONFIG_XNM_NETHELP_INCLUDE_PROPP
+XNM::PropertyPoint::Handler propp = XNM::PropertyPoint::Handler();
+
+XNM::PropertyPoint::CustomProperty system_property(propp, "_system");
+
+#ifdef CONFIG_XNM_NETHELP_PROPP_UART
+XNM::PropertyPoint::UARTOutput propp_uart_out(propp);
+#endif
+
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
+XNM::PropertyPoint::MQTTOutput propp_mqtt_out(propp, mqtt);
+#endif
+
+#ifdef CONFIG_XNM_NETHELP_BLE_ENABLE
+XNM::PropertyPoint::BLEOutput propp_ble_out(propp, ble);
+#endif
+#endif
+
+void event_handler(system_event_t *event) {
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
+    mqtt.wifi_handler(event);
+#endif
 }
 
 void set_device_id() {
@@ -152,19 +86,26 @@ std::string get_device_id() {
     return device_id;
 }
 
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
 vprintf_like_t previous_printf = nullptr;
 int vprintf_like_mqtt(const char *format, va_list args) {
-    auto prev_return = previous_printf(format, args);
-    if(mqtt_ptr == nullptr)
-        return prev_return;
+    static volatile uint8_t print_nest_count = 0;
 
-    if(mqtt_ptr->is_disconnected())
+    auto prev_return = previous_printf(format, args);
+
+    if(mqtt.is_disconnected())
         return prev_return;
     
+    print_nest_count++;
+    
     char printf_buffer[256] = {};
-    vsnprintf(printf_buffer, sizeof(printf_buffer), format, args);
+    if(print_nest_count < 2) {
+        vsnprintf(printf_buffer, sizeof(printf_buffer), format, args);
 
-    mqtt_ptr->publish_to("logs", printf_buffer, strlen(printf_buffer));
+        mqtt.publish_to("logs", printf_buffer, strlen(printf_buffer));
+    }
+    
+    print_nest_count--;
     return strlen(printf_buffer);
 }
 
@@ -172,6 +113,12 @@ vprintf_like_t init_mqtt_logs() {
     previous_printf = esp_log_set_vprintf(vprintf_like_mqtt);
     return previous_printf;
 }
+
+#else // If we do not have MQTT running, do nothing to initialize MQTT logging
+vprintf_like_t init_mqtt_logs() {
+	return nullptr;
+}
+#endif
 
 void init_global_r3_ca() {
     esp_tls_set_global_ca_store(reinterpret_cast<const unsigned char*>(lets_encrypt_rX_pem_start), lets_encrypt_rX_pem_end - lets_encrypt_rX_pem_start);
@@ -202,15 +149,216 @@ void report_boot_reason() {
     }
 }
 
-void init() {
-#ifdef CONFIG_AUTOSTART_MQTT_LOG_REDIR
-    init_mqtt_logs();
-    esp_log_level_set("TRANS_TCP", ESP_LOG_NONE);
+void init_sntp() {
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+    sntp_setservername(0, "pool.ntp.org\0");
+
+    sntp_init();
+}
+
+#ifdef CONFIG_XNM_NETHELP_BLE_ENABLE
+void init_ble() {
+    static bool ble_was_started = false;
+    if(ble_was_started)
+        return;
+
+    net_state = BLE_MODE;
+
+    ble.init();
+    ble.start_advertising();
+
+    ble_was_started = true;
+
+#ifdef CONFIG_XNM_NETHELP_BLE_CONFMODE_BLOCK
+    while(true) {
+        vTaskDelay(portMAX_DELAY);
+    }
+#endif
+}
+#else
+void init_ble() {}
 #endif
 
-#ifdef CONFIG_AUTOSTART_OTA
-    OTA::init();
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
+void init_mqtt() {
+    mqtt.start_from_nvs();
+
+    TickType_t start_tick = xTaskGetTickCount();
+
+    while(true) {
+        vTaskDelay(50/portTICK_PERIOD_MS);
+
+        if(mqtt.is_disconnected() == 0) {
+            net_state = NETWORK_MODE;
+            break;
+        }
+
+        if((xTaskGetTickCount() - start_tick) > (CONFIG_XNM_NETHELP_MQTT_CON_TIME / portTICK_PERIOD_MS)) {
+            mqtt.stop();
+            return;
+        }
+    }
+
+#ifdef CONFIG_AUTOSTART_MQTT_LOG_REDIR
+    esp_log_level_set("TRANS_TCP", ESP_LOG_NONE);
+    init_mqtt_logs();
 #endif
+
+#ifdef CONFIG_AUTOSTART_MQTT_OTA_CHECK
+    do {
+        char bfr[255] = {};
+        snprintf(bfr, 255, "/esp32/%s/ota/%s", CONFIG_PROJECT_NAME, OTA::get_branch_name());
+
+        mqtt.subscribe_to(bfr, [](Xasin::MQTT::MQTT_Packet data) {
+            auto upstream_vers = strtol(data.data.data(), nullptr, 10);
+            if(upstream_vers != 0) {
+                OTA::set_upstream_version(upstream_vers);
+
+                char vers_buffer[64] = {};
+                OTA::print_version(vers_buffer, 64, upstream_vers);
+
+                ESP_LOGI("OTA", "New version available: %s", vers_buffer);
+            }
+        });
+    } while(false);
+#endif
+}
+#else
+void init_mqtt() {
+    net_state = NETWORK_MODE;
+}
+#endif
+
+#ifdef CONFIG_XNM_NETHELP_INCLUDE_PROPP
+
+cJSON * system_property_get_json() {
+    cJSON * out = cJSON_CreateObject();
+
+    cJSON_AddItemToObjectCS(out, "heap", cJSON_CreateNumber(esp_get_free_heap_size()));
+    cJSON_AddItemToObjectCS(out, "heap_block",
+        cJSON_CreateNumber(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
+
+    return out;
+}
+
+void system_property_set_json(const cJSON * data) {
+    auto ssid_item = cJSON_GetObjectItem(data, "wifi_ssid");
+    auto password_item = cJSON_GetObjectItem(data, "wifi_password");
+
+    if(cJSON_IsString(ssid_item) && cJSON_IsString(password_item)) {
+        WIFI::set_nvs(ssid_item->valuestring, password_item->valuestring);
+    }
+
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
+    auto mqtt_item = cJSON_GetObjectItem(data, "mqtt");
+
+    if(cJSON_IsString(mqtt_item)) {
+        mqtt.set_nvs_uri(mqtt_item->valuestring);
+    }
+#endif
+
+    if(cJSON_IsTrue(cJSON_GetObjectItem(data, "rollback"))) {
+        OTA::force_rollback();
+    }
+
+    if(cJSON_IsTrue(cJSON_GetObjectItem(data, "reboot"))) {
+        esp_restart();
+    }
+}
+
+void init_propp() {
+
+#ifdef CONFIG_XNM_NETHELP_BLE_ENABLE
+    propp_ble_out.init();
+#endif
+#ifdef CONFIG_XNM_NETHELP_MQTT_ENABLE
+    propp_mqtt_out.init();
+#endif
+#ifdef CONFIG_XNM_NETHELP_PROPP_UART
+    propp_uart_out.init();
+#endif
+
+    system_property.on_get_state = system_property_get_json;
+    system_property.on_process   = system_property_set_json;
+    system_property.init();
+}
+
+void propp_housekeep_tick() {
+    static TickType_t last_housekeep_tick = 0;
+
+    if(xTaskGetTickCount() - last_housekeep_tick >= (5000/portTICK_PERIOD_MS)) {
+        last_housekeep_tick = xTaskGetTickCount();
+
+        system_property.poke_update();
+    }
+}
+#else
+void init_propp() {}
+void propp_housekeep_tick() {}
+#endif
+
+void nethelp_housekeep_tick(void *arg) {
+    ESP_LOGI("XNM::NetHelp", "Housekeeping task started!");
+
+    while(true) {
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+
+        WIFI::housekeep_tick();
+        propp_housekeep_tick();
+
+        OTA::housekeep_tick();
+    }
+}
+
+void init() {
+    xTaskCreate(nethelp_housekeep_tick, "XNM::Housekeep",
+        4096, nullptr, 3, nullptr);
+
+    init_propp();
+
+#ifdef CONFIG_XNM_NETHELP_BLE_ALWAYSON
+    init_ble();
+#endif
+
+#ifdef CONFIG_XNM_NETHELP_BLE_AUTOCONF
+    if(!WIFI::has_config()) {
+        init_ble();
+        return;
+    }
+#endif
+
+    if(WIFI::should_autostart()) {
+        net_state = WIFI_CONNECTING;
+
+        if(WIFI::init(true)) {
+            net_state = WIFI_CONNECTED;
+            init_sntp();
+        }
+    }
+    else {
+        ESP_LOGI("XNM::NetHelp", "No autostart of WiFi is being performed...");
+    }
+
+#ifdef CONFIG_XNM_NETHELP_BLE_NONETWORK
+    if(net_state != WIFI_CONNECTED) {
+        init_ble();
+        return;
+    }
+#endif
+
+    OTA::init();
+
+    init_mqtt();
+
+#ifdef CONFIG_XNM_NETHELP_BLE_NONETWORK
+    if(net_state != NETWORK_MODE) {
+        init_ble();
+    }
+#endif
+
+    report_boot_reason();
+    OTA::report_version();
 }
 
 }

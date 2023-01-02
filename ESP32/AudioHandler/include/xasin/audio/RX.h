@@ -17,6 +17,12 @@
 
 #define XASAUDIO_RX_FRAME_SAMPLE_NO ((CONFIG_XASAUDIO_RX_SAMPLERATE * CONFIG_XASAUDIO_RX_FRAMELENGTH)/1000)
 
+#ifdef I2S_NUM_1
+#define XNM_DEFAULT_RX_I2S I2S_NUM_1
+#else
+#define XNM_DEFAULT_RX_I2S I2S_NUM_0
+#endif
+
 namespace Xasin {
 namespace Audio {
 
@@ -29,7 +35,7 @@ private:
 
 	std::array<uint8_t, 4 * 2 * XASAUDIO_RX_FRAME_SAMPLE_NO> raw_dma_buffer;
 
-	std::array<rx_buffer_t, 4> audio_buffer;
+	std::array<rx_buffer_t, 6> audio_buffer;
 	uint8_t buffer_fill_pos;
 	uint8_t buffer_read_pos;
 
@@ -49,7 +55,7 @@ public:
 
 	void audio_dma_read_task();
 
-	RX(uint8_t data_offset = 0, i2s_port_t rx_port = I2S_NUM_1);
+	RX(uint8_t data_offset = 0, i2s_port_t rx_port = XNM_DEFAULT_RX_I2S);
 	RX(const RX&) = delete;
 
 	// virtual ~RX();
@@ -68,6 +74,8 @@ public:
 
 	void start();
 	void stop();
+
+	bool running();
 };
 
 } /* namespace Audio */

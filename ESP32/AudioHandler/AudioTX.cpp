@@ -88,7 +88,7 @@ void TX::insert_source(Source * source) {
 void TX::add_interleaved_frame(const int16_t *data, uint8_t volume) {
 	for(int i=0; i < 2*XASAUDIO_TX_FRAME_SAMPLE_NO; i++) {
 		int32_t new_audio_value = audio_buffer[i];
-		new_audio_value += (volume_mod * volume * int32_t(*data)) >> 16;
+		new_audio_value += (volume_mod * volume * int64_t(*data)) / (1<<16);
 
 		if(new_audio_value > INT16_MAX) {
 			clipping = true;
@@ -110,7 +110,7 @@ void TX::add_lr_frame(const int16_t *data, bool left, uint8_t volume) {
 		int audio_index = i*2 + (left ? 1 : 0);
 
 		int32_t new_audio_value = audio_buffer[audio_index];
-		new_audio_value += (volume_mod * volume * int32_t(*data)) >> 16;
+		new_audio_value += (volume_mod * volume * int64_t(*data)) / (1<<16);
 
 		if(new_audio_value > INT16_MAX) {
 			clipping = true;
@@ -133,8 +133,15 @@ void TX::audio_dma_fill_task() {
 	while(true) {
 		// As long as we haven't been idling for a while, continue playback.
 		if(audio_idle_count < 0) {
-			uint32_t written_data = 0;
-			i2s_write(i2s_port, audio_buffer.data(), audio_buffer.size()*2, &written_data, portMAX_DELAY);
+			size_t total_written_data = 0;
+
+			while(total_written_data < audio_buffer.size()) {
+				size_t local_written_bytes = 0;
+				
+				i2s_write(i2s_port, audio_buffer.data()+total_written_data, (audio_buffer.size()-total_written_data)*2, &local_written_bytes, portMAX_DELAY);
+
+				total_written_data += local_written_bytes/2;
+			}
 		}
 		// The I2S Port has been stopped, simply wait for new data, a new audio source or similar
 		else {
@@ -227,12 +234,13 @@ void TX::init(TaskHandle_t processing_task, const i2s_pin_config_t &pin_config) 
 	cfg.sample_rate = CONFIG_XASAUDIO_TX_SAMPLERATE;
 	cfg.bits_per_sample = i2s_bits_per_sample_t(16);
 	cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
-	cfg.communication_format = I2S_COMM_FORMAT_I2S_MSB;
+	cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
 	cfg.intr_alloc_flags = 0;
 
-	uint32_t num_buffer_bytes = XASAUDIO_TX_FRAME_SAMPLE_NO * 2 * CONFIG_XASAUDIO_TX_DMA_COUNT;
+	//uint32_t num_buffer_bytes = XASAUDIO_TX_FRAME_SAMPLE_NO * 2 * CONFIG_XASAUDIO_TX_DMA_COUNT;
 
-	cfg.dma_buf_count = 1 + (num_buffer_bytes / 1024);
+	//cfg.dma_buf_count = 1 + (num_buffer_bytes / 1024);
+	cfg.dma_buf_count = 2;
 	cfg.dma_buf_len = 1024;
 
 	i2s_driver_install(i2s_port, &cfg, 0, nullptr);
