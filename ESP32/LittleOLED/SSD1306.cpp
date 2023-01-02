@@ -26,7 +26,7 @@ void SSD1306::call_raw_update(void *args) {
 }
 
 SSD1306::SSD1306() :
-		DrawBox(128, 32),
+		DrawBox(128, 64),
 		currentAction(nullptr), cmdBuffer(),
 		screenBuffer(),
 		updateTask(nullptr) {
@@ -55,7 +55,7 @@ void SSD1306::initialize() {
 
 	push_entire_screen();
 
-	xTaskCreate(SSD1306::call_raw_update, "SSD1306 Updater", 2048, this, 3, &updateTask);
+	xTaskCreate(SSD1306::call_raw_update, "SSD1306 Updater", 4096, this, 3, &updateTask);
 	puts("SSD initialized!");
 }
 
