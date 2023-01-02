@@ -9,6 +9,10 @@
 
 #include <stdio.h>
 
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 namespace Peripheral {
 namespace OLED {
 
@@ -180,6 +184,7 @@ void DrawBox::write_char(int x, int y, char c, int8_t foreground, int8_t backgro
 	for(uint8_t dy=0; dy<font->height; dy++) {
 		for(uint8_t dx=0; dx<font->width; dx++)
 			set_pixel(x+dx, y+dy, ((fontChar[dy]>>(7-dx)) & 1) ? foreground : background);
+		
 	}
 }
 void DrawBox::write_string(int x, int y, const std::string oString, int8_t foreground, int8_t background, FontType *font) {
