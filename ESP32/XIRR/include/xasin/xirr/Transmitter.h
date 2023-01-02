@@ -11,7 +11,7 @@
 #include "driver/rmt.h"
 
 #include "esp_pm.h"
-#include "esp32/pm.h"
+#include "esp32s2/pm.h"
 
 #include <string>
 #include <vector>

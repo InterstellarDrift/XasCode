@@ -47,7 +47,12 @@ void handler_wifi_checkup_task(void *eh) {
 
 		if(wifi_task_conn_counter == -1)
 			continue;
+<<<<<<< HEAD
 		ESP_LOGI("XNM:WiFi", "Retrying connection...");
+=======
+		ESP_LOGI("XAQTT:WiFi", "Retrying connection...");
+		sleep(1);
+>>>>>>> 085923101991c6d40fb12933139bde02fb37bda2
 		esp_wifi_start();
 	}
 }
@@ -74,7 +79,12 @@ bool Handler::start_wifi_from_nvs(int psMode) {
 	if(ret != ESP_OK)
 		return false;
 
+<<<<<<< HEAD
 	start_wifi(ssid_buffer, pswd_buffer, psMode);
+=======
+	sleep(1);
+	start_wifi(ssid_buffer, pswd_buffer);
+>>>>>>> 085923101991c6d40fb12933139bde02fb37bda2
 
 	return true;
 }
@@ -127,7 +137,7 @@ void Handler::start_wifi(const char *SSID, const char *PSWD, int psMode) {
 	else if(psMode == -1) {
 		ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 	}
-
+	sleep(1);
 	ESP_ERROR_CHECK( esp_wifi_start() );
 }
 
@@ -189,11 +199,13 @@ void Handler::try_wifi_reconnect(system_event_t *event) {
 		sntp_was_initialized = true;
 
 	case SYSTEM_EVENT_STA_START:
+		sleep(1);
 		esp_wifi_connect();
 		break;
 	case SYSTEM_EVENT_STA_DISCONNECTED:
 		ESP_LOGW("XAQTT::WiFi", "Disconnected");
 
+		sleep(1);
 		esp_wifi_stop();
 		wifi_task_conn_counter++;
 		xTaskNotify(wifi_task_handle, 0, eNoAction);
